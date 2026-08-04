@@ -1,5 +1,7 @@
 # 2XD8 Entropy Booklet
 
+![2XD8 Entropy Booklet cover](src/cover.png)
+
 *Offline BIP39 Entropy*
 
 A fork of the [Seed Jar Method](https://github.com/bowtiedcrake/seed-jar-method-d8) that drops the jar and the printed
