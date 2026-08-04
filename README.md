@@ -177,6 +177,14 @@ your printer's flip convention matches.
 
 ---
 
+## Credits
+
+The 1–32 card-select table — the White/Black-pair → card-number mapping
+used on the CARD SELECT page — was created by
+[@FieldNas](https://x.com/FieldNas) on X. Used here with thanks.
+
+---
+
 ## License
 
 Released under **CC0 1.0** (public domain dedication) — see `LICENSE`.
