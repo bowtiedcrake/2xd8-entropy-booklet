@@ -78,7 +78,7 @@ def generate(path, mnemonic_words):
     y = table_bottom - 6 * mm
     c.setFont("MonoB", 9)
     if mnemonic_words == 24:
-        c.drawString(left, y, "FINAL 3 ENTROPY BITS (one WHITE+BLACK pair roll; use FINAL 3 BITS table)")
+        c.drawString(left, y, "FINAL 3 ENTROPY BITS (roll WHITE and BLACK together once; use FINAL 3 BITS table)")
         y -= 7 * mm
         c.setFont("Mono", 9)
         c.drawString(left, y, "WHITE = ______    BLACK = ______    BITS = ___")

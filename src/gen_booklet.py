@@ -123,28 +123,84 @@ def section(c, heading, items, footer="OPPOSITE-FOLD EASY GUIDE"):
     c.showPage()
 
 
-def draw_cover(c, edition):
+def draw_d8_icon(c, cx, cy, radius, die_label, hatched=False):
+    """Low-ink octahedron line art; hatching distinguishes the BLACK role."""
+    top = (cx, cy + radius)
+    right = (cx + radius * .78, cy)
+    bottom = (cx, cy - radius)
+    left = (cx - radius * .78, cy)
+    c.setStrokeColor(black)
+    c.setLineWidth(1.2)
+    path = c.beginPath()
+    path.moveTo(*top); path.lineTo(*right); path.lineTo(*bottom)
+    path.lineTo(*left); path.close()
+    c.drawPath(path, stroke=1, fill=0)
+    c.setLineWidth(.55)
+    c.line(*top, cx, cy)
+    c.line(*right, cx, cy)
+    c.line(*bottom, cx, cy)
+    c.line(*left, cx, cy)
+    if hatched:
+        c.setLineWidth(.35)
+        for offset in (-7, -3.5, 0, 3.5, 7):
+            c.line(cx + offset - 3, cy - 7, cx + offset + 3, cy - 1)
     c.setFillColor(black)
-    c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
+    c.setFont("MonoB", 12)
+    c.drawCentredString(cx, cy + 1.5 * mm, die_label)
+
+
+def draw_cover(c, edition):
+    """A low-ink cover designed for ordinary monochrome home printers."""
     c.setFillColor(white)
-    c.setFont("MonoB", 22)
-    c.drawCentredString(PAGE_W / 2, 153 * mm, "2XD8 ENTROPY")
-    c.drawCentredString(PAGE_W / 2, 142 * mm, "BOOKLET")
-    c.setLineWidth(1.1)
-    c.line(22 * mm, 134 * mm, PAGE_W - 22 * mm, 134 * mm)
-    c.setFont("MonoB", 14)
-    c.drawCentredString(PAGE_W / 2, 117 * mm, "OPPOSITE-COMPLEMENT FOLD")
-    c.setFont("Mono", 10)
-    c.drawCentredString(PAGE_W / 2, 106 * mm, edition)
-    c.setFont("Mono", 8)
-    c.drawCentredString(PAGE_W / 2, 75 * mm, "TWO DISTINGUISHABLE STANDARD D8 DICE")
-    c.drawCentredString(PAGE_W / 2, 68 * mm, "PHYSICAL ENTROPY - OFFLINE CHECKSUM")
+    c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
+    outer = 7 * mm
+    inner = 9 * mm
+    c.setStrokeColor(black)
+    c.setLineWidth(1.35)
+    c.rect(outer, outer, PAGE_W - 2 * outer, PAGE_H - 2 * outer, stroke=1, fill=0)
+    c.setLineWidth(.35)
+    c.rect(inner, inner, PAGE_W - 2 * inner, PAGE_H - 2 * inner, stroke=1, fill=0)
+
+    c.setFillColor(black)
+    c.setFont("MonoB", 7.5)
+    c.drawCentredString(PAGE_W / 2, 187 * mm, "OFFLINE BIP39 ENTROPY")
+    c.setFont("MonoB", 27)
+    c.drawCentredString(PAGE_W / 2, 169 * mm, "2XD8")
+    c.setFont("MonoB", 20)
+    c.drawCentredString(PAGE_W / 2, 157 * mm, "ENTROPY BOOKLET")
+    V.double_rule(c, 24 * mm, PAGE_W - 24 * mm, 149 * mm, thick=1.0, thin=.3, gap=1.0)
+    c.setFont("MonoB", 11.5)
+    c.drawCentredString(PAGE_W / 2, 137 * mm, "OPPOSITE-COMPLEMENT FOLD")
+
+    draw_d8_icon(c, 49 * mm, 111 * mm, 15 * mm, "W")
+    draw_d8_icon(c, 99 * mm, 111 * mm, 15 * mm, "B", hatched=True)
+    c.setFont("MonoB", 6.5)
+    c.drawCentredString(PAGE_W / 2, 109 * mm, "AND")
+    c.setFont("Mono", 6.7)
+    c.drawCentredString(49 * mm, 91 * mm, "WHITE ROLE")
+    c.setFont("MonoB", 6.7)
+    c.drawCentredString(99 * mm, 91 * mm, "BLACK ROLE")
+
+    badge_left, badge_right = 25 * mm, PAGE_W - 25 * mm
+    c.setFillColor(LIGHT)
+    c.rect(badge_left, 74 * mm, badge_right - badge_left, 10 * mm, stroke=1, fill=1)
+    c.setFillColor(black)
     c.setFont("MonoB", 8.5)
-    c.drawCentredString(PAGE_W / 2, 41 * mm, "VERIFY BOTH DICE BEFORE USE")
-    c.setFont("Mono", 7.5)
-    c.drawCentredString(PAGE_W / 2, 34 * mm, "OPPOSITES: 1<->8  2<->7  3<->6  4<->5")
-    c.setFont("Mono", 6.5)
-    c.drawCentredString(PAGE_W / 2, 12 * mm, "CC0 1.0 - FOR AUDITABLE OFFLINE USE")
+    c.drawCentredString(PAGE_W / 2, 77.2 * mm, edition)
+    c.setFont("Mono", 7.3)
+    c.drawCentredString(PAGE_W / 2, 64 * mm, "TWO DISTINGUISHABLE STANDARD D8 DICE")
+    c.drawCentredString(PAGE_W / 2, 58 * mm, "PHYSICAL ENTROPY - DETERMINISTIC CHECKSUM")
+
+    c.setLineWidth(.65)
+    c.line(22 * mm, 48 * mm, PAGE_W - 22 * mm, 48 * mm)
+    c.setFont("MonoB", 7.5)
+    c.drawCentredString(PAGE_W / 2, 40 * mm, "VERIFY BOTH DICE BEFORE USE")
+    c.setFont("Mono", 7.2)
+    c.drawCentredString(PAGE_W / 2, 34 * mm, "PHYSICAL OPPOSITES")
+    c.setFont("MonoB", 8)
+    c.drawCentredString(PAGE_W / 2, 28 * mm, "1<->8   2<->7   3<->6   4<->5")
+    c.setFont("Mono", 5.8)
+    c.drawCentredString(PAGE_W / 2, 14 * mm, "CC0 1.0 - REPRODUCIBLE, AUDITABLE, OFFLINE")
     c.showPage()
 
 
@@ -169,7 +225,7 @@ def draw_guide_pages(c):
     ])
     section(c, "FINAL ENTROPY + CHECKSUM", [
         ("h", "24 WORDS"),
-        ("p", "Generate 23 full word indices: 253 entropy bits. Then use the FINAL 3 BITS table for one additional physical WHITE+BLACK pair roll. Those 3 bits complete the 256-bit entropy."),
+        ("p", "Generate 23 full word indices: 253 entropy bits. Then use the FINAL 3 BITS table for one additional physical pair roll of WHITE and BLACK together. Those 3 bits complete the 256-bit entropy."),
         ("h", "12 WORDS"),
         ("p", "Generate 11 full word indices: 121 entropy bits. Then use the FINAL 7 BITS procedure: one CARD SELECT pair roll plus one additional WHITE-only roll. Those 7 bits complete the 128-bit entropy."),
         ("h", "CHECKSUM"),
@@ -263,7 +319,7 @@ def draw_selector(c):
 
 def draw_final3(c):
     left, right, top, bottom = frame(c, "24 WORDS - PHYSICAL FINAL 3 ENTROPY BITS")
-    y = title(c, "FINAL 3 BITS", "After 23 full words, roll WHITE + BLACK once")
+    y = title(c, "FINAL 3 BITS", "After 23 full words, roll WHITE and BLACK together once")
     y = paragraph(c, "Use the actual WHITE row and actual BLACK column. Record the printed three bits. This completes all 256 entropy bits before checksum calculation.", left, y, right - left, size=8.2)
     label_w = 8 * mm
     grid_left, grid_right = left + label_w, right
@@ -353,7 +409,7 @@ def draw_final7_page(c, first_card, last_card, instructions):
 def draw_final7(c):
     draw_final7_page(
         c, 1, 16,
-        "After 11 full words: 1. Roll WHITE+BLACK and use CARD SELECT; keep CARD and MODE. 2. Roll WHITE only; BLACK is not rolled and no second Black result is used. 3. Use the mode row to choose a 2-bit column. 4. Cross CARD and that column; record the direct 7-bit result.",
+        "After 11 full words: 1. Roll WHITE and BLACK together, then use CARD SELECT; keep CARD and MODE. 2. Roll WHITE only; BLACK is not rolled and no second Black result is used. 3. Use the mode row to choose a 2-bit column. 4. Cross CARD and that column; record the direct 7-bit result.",
     )
     draw_final7_page(
         c, 17, 32,

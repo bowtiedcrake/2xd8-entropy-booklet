@@ -52,7 +52,7 @@ The user performs no complement arithmetic.
 
 ## Folded final 3 bits
 
-For one actual WHITE+BLACK pair, canonicalize the first roll as above and compute its card 1 through 32. The output is:
+For one pair roll of the actual WHITE and BLACK dice together, canonicalize the readings as above and compute their card 1 through 32. The output is:
 
 ```text
 value3 = floor((card - 1) / 4)
