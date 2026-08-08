@@ -1,196 +1,146 @@
-# 2XD8 Entropy Booklet
+# 2XD8 Entropy Booklet - Opposite-Complement Fold
 
-![2XD8 Entropy Booklet cover](src/cover.png)
+This is a fork of [`bowtiedcrake/2xd8-entropy-booklet`](https://github.com/bowtiedcrake/2xd8-entropy-booklet), based on upstream commit `34168e757ea1eba2a8eab2ac2187da593deb9c84`.
 
-*Offline BIP39 Entropy*
+It still uses two distinguishable d8 dice and a printed booklet, but it changes the 4,096-to-2,048 mapping. Each four-reading sequence is paired with the sequence obtained by replacing every face with its physical opposite: `1<->8`, `2<->7`, `3<->6`, `4<->5`.
 
-A fork of the [Seed Jar Method](https://github.com/bowtiedcrake/seed-jar-method-d8) that drops the jar and the printed
-tickets entirely. One A5 booklet, one pair of distinguishable d8 dice. No
-cutting, no jar, no printer run beyond the one that made this booklet.
+The Easy edition encodes the entire transformation in printed NORMAL/MIRROR pages. Ordinary word generation requires no subtraction, binary arithmetic, modulo operation, rejection, or face conversion:
 
-> ⚠️ **Read the whole booklet before using this for real funds.** Same as the
-> jar method: these pages produce *raw entropy only* — the valid final
-> (checksum) word must be computed by a hardware wallet or an offline tool.
-
----
-
-## How it's different from the Seed Jar Method
-
-The jar method spends one blind ticket-draw (5 bits) plus one d8 double-roll
-(6 bits) per word. This fork has no tickets to draw, so the same two dice do
-that job too: **roll the pair twice per word instead of once.**
-
-1. **Roll 1 — card select.** White die read openly (1–8, 3 bits); Black die
-   read only as a pair — 1/2, 3/4, 5/6, or 7/8 (2 bits). Cross them on the
-   CARD SELECT page to get a card, 1–32.
-2. **Roll 2 — word select.** White = row, Black = column, full 8×8 on that
-   card (6 bits).
-
-5 + 6 = 11 bits = 1-of-2048, same uniform math as the jar method — just
-sourced from four die reads instead of a draw plus two die reads.
-
-**The honest tradeoff:** this roughly doubles the number of physical die
-rolls per word (4 rolls vs. 2 rolls + 1 draw) in exchange for removing every
-piece of jar/ticket hardware and the caveats that came with it (ticket
-tells, shake quality, sourcing an opaque container). Pick whichever fork
-suits you — this one is for "I don't want to print, cut, or carry a jar,"
-not for "fewest possible dice rolls." That one's still the jar method.
-
----
-
-## Contents
-
-- `2XD8_Entropy_Booklet.pdf` — the whole product: cover, short guide,
-  card-select table, and all 32 word-grid cards, one A5-portrait page each.
-- `src/` — the generator (`gen_booklet.py`), the wordlist, fonts, and an
-  independent validator, forked from the jar method's `src/`.
-
-There is no tickets generator in this fork — there's nothing to cut.
-
----
-
-## The math (why it's uniform)
-
-- Card select: White's full 8 values (3 bits) × Black collapsed into 4 equal
-  pairs (2 bits) = 5 bits → 1-of-32 cards.
-- Word select: White × Black, full 8×8 on that card = 6 bits → 1-of-64 cells.
-- 5 + 6 = **11 bits = 1-of-2048**, exactly uniform, no modulo bias.
-
-Card *n* holds BIP39 indices `n + 32·k` for `k = 0…63`, same mapping as the
-jar method, so all 2048 words appear exactly once across the 32 cards.
-
-Why White and Black must stay fixed roles across **both** rolls: if they
-were swapped mid-process, or indistinguishable, outcomes that should be
-distinct would collapse together and break uniformity — same argument as
-the jar method's row/column dice, just now applying to two rolls instead
-of one.
-
----
-
-## What you need
-
-- This booklet, printed and bound (see [Printing & binding](#printing--binding)).
-- **Two distinguishable eight-sided dice (d8)** — one always White, one
-  always Black, never swapped.
-- A compatible **hardware wallet** with a "generate from dice / enter your
-  own entropy" feature (e.g. Blockstream Jade, BitBox02), **or** an offline
-  BIP39 tool for the final checksum word.
-- A pen and paper.
-
----
-
-## Step-by-step: generating a seed
-
-Decide your length first: a **12-word** seed needs **11** drawn words; a
-**24-word** seed needs **23**.
-
-For **each** word:
-
-1. Turn to the **CARD SELECT** page.
-2. Roll both dice. Read White openly, 1–8. Read Black only as a pair:
-   1/2, 3/4, 5/6, or 7/8.
-3. Cross White against the Black-pair on the table to get a card number,
-   1–32. Turn to that card.
-4. Roll both dice again. White gives the row (1–8); Black gives the column
-   (1–8).
-5. Read the word at that row/column and write it down.
-6. Repeat from step 2.
-
-> Roll hard — from a cup or against a wall. Dice barely tumble on a soft
-> surface, so a weak roll is weak randomness.
-
----
-
-## The checksum step
-
-Same as the jar method, unchanged: **the cards produce raw entropy only —
-never the finished mnemonic.** Draw the first 11 (or 23) words with the
-booklet, then let a hardware wallet or offline BIP39 tool compute the valid
-final checksum word. **Never** hand-pick, guess, or re-roll only the last
-word — that silently destroys uniformity. Do this step air-gapped.
-
----
-
-## Verify it yourself (don't trust, verify)
-
-```bash
-cd src
-pip install -r requirements.txt        # reportlab (+ pdfplumber for validation)
-python gen_booklet.py                  # -> ../2XD8_Entropy_Booklet.pdf
-python validate.py                     # independent check of the finished PDF
+```text
+ROLL
+LOOK UP CARD + MODE
+TURN TO THAT PAGE
+ROLL
+LOOK UP WORD
 ```
 
-The generator refuses to output unless: exactly 32 cards, 64 cells each,
-every index 1–2048 present exactly once, and the card-select table covers
-1–32 exactly once. `validate.py` re-opens the finished PDF and confirms all
-2048 words/indices and the full card-select table actually rendered, and
-diffs `src/english.txt` word-for-word against the upstream `bitcoin/bips`
-wordlist.
+> Before use, physically inspect both dice. Their opposite faces must be `1<->8`, `2<->7`, `3<->6`, and `4<->5`. If either die differs, do not use this edition.
 
----
+This fork changes the entropy mapping and is not the same procedure as the upstream booklet. It is not presented as endorsed by the upstream author.
 
-## Printing & binding
+## Artifacts
 
-Every page is a single A5-portrait (148×210mm) sheet — cover, guide, the
-card-select table, and each of the 32 cards. Print single-sided on
-cardstock or heavy paper and bind however you like (saddle-stitch, comb, a
-binder ring through the left edge) — nothing about the layout assumes a
-particular binding method.
+- `2XD8_Entropy_Booklet_OppositeFold_Easy.pdf` - primary A5 reader edition, with separate NORMAL and MIRROR pages for every card.
+- `2XD8_Entropy_Booklet_OppositeFold_Easy_Print-at-Home.pdf` - Easy edition imposed two-up on A4 landscape.
+- `2XD8_Entropy_Booklet_OppositeFold_Compact.pdf` - secondary/advanced A5 edition with dual coordinate labels.
+- `2XD8_Entropy_Booklet_OppositeFold_Compact_Print-at-Home.pdf` - Compact edition imposed two-up on A4 landscape.
+- `2XD8_Entropy_Worksheet_24.pdf` and `2XD8_Entropy_Worksheet_12.pdf` - optional consumable audit worksheets. A completed worksheet is as sensitive as the mnemonic entropy.
+- `tools/checksum_only.py` - optional deterministic checksum-only helper. It contains no RNG and performs no network, wallet, key, or address operations.
 
-### Printing it as an actual folded booklet
+The Easy edition is recommended. The Compact edition saves pages but asks the user to choose the coordinate labels for the recorded mode.
 
-`2XD8_Entropy_Booklet_Print-at-Home.pdf` is a second, separate PDF (never
-overwrites the reader PDF) built by `src/impose_booklet.py`: it reorders and
-pairs the reader pages two-up onto A4-landscape sheets in standard
-saddle-stitch order, padding to a multiple of 4 with blank A5 pages at the
-end. Fold the whole printed stack in half at once and staple through the
-spine — the pages come out in order.
+## Generate one complete 11-bit word
+
+Use two visually distinguishable d8 dice with fixed roles: WHITE and BLACK.
+
+1. Roll WHITE and BLACK together.
+2. Cross the actual readings on CARD SELECT.
+3. Record both the CARD and the full mode, NORMAL or MIRROR.
+4. Turn to exactly that CARD/MODE page.
+5. Roll WHITE and BLACK together again.
+6. Use the actual WHITE result as row and actual BLACK result as column.
+7. Record the word, and optionally its printed one-based BIP39 index.
+
+On a MIRROR page the actual values are still used directly. The page data implements the complement; the user never calculates `9-x`.
+
+If CARD/MODE or die roles are lost before a word is complete, discard that word attempt and restart it from the first pair roll.
+
+## Correct BIP39 finalization
+
+A final BIP39 word is not entirely checksum.
+
+- A 24-word mnemonic has 256 entropy bits plus 8 checksum bits. The first 23 complete word indices contain 253 entropy bits. Generate the missing 3 entropy bits physically with the booklet's folded FINAL 3 BITS table, then calculate the checksum.
+- A 12-word mnemonic has 128 entropy bits plus 4 checksum bits. The first 11 complete word indices contain 121 entropy bits. Generate the missing 7 entropy bits physically with the booklet's folded FINAL 7 BITS procedure, then calculate the checksum.
+
+The checksum device/tool may hash completed entropy; it must not invent the remaining entropy bits or call an RNG.
+
+> The checksum tool is allowed to calculate; it is not allowed to contribute randomness.
+
+Example helper calls, using either one-based indices or BIP39 words:
 
 ```bash
-cd src
-python impose_booklet.py               # -> ../2XD8_Entropy_Booklet_Print-at-Home.pdf
+python tools/checksum_only.py --length 12 --prefix \
+  abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+  --final-bits 0000000
+
+python tools/checksum_only.py --length 24 --prefix \
+  1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 \
+  --final-bits 000
 ```
 
-How to print it:
-- **Duplex printer:** turn on two-sided printing, flip on the **short**
-  edge, print the whole file once.
-- **Single-sided printer:** print **odd** pages only, flip the entire
-  printed stack over left-to-right (like turning a page — don't rotate
-  it), reload it the same way up, then print **even** pages only.
+## Why the full-word mapping is exactly uniform for fair dice
 
-Do a single test sheet before running a full batch of copies to confirm
-your printer's flip convention matches.
+For raw readings `T = (W1,B1,W2,B2)`, define:
 
----
+```text
+C(T) = (9-W1, 9-B1, 9-W2, 9-B2)
+```
 
-## Caveats & honest limitations
+`C` is an involution with no fixed points. It partitions the 4,096 raw tuples into 2,048 two-element classes. Canonicalization chooses the member whose first WHITE value is 1 through 4, then maps the resulting `4 x 8 x 8 x 8` canonical space bijectively to 32 cards by 8 rows by 8 columns. Every BIP39 index therefore has exactly two raw preimages, giving `2/4096 = 1/2048` under fair independent rolls.
 
-- **d8 quality.** Cheap dice have some bias. Roll hard; for larger sums,
-  casino-grade dice are marginally better.
-- **More rolls than the jar method.** See
-  [How it's different](#how-its-different-from-the-seed-jar-method) — this
-  fork trades roll-count for zero jar/ticket hardware, not the other way
-  around.
-- **Same-dice, two-meanings discipline.** White and Black mean different
-  things on the card-select roll vs. the word-select roll. Don't mix up
-  which roll you're on mid-word.
-- **This is a hobbyist tool.** Not a certified RNG. Understand each step
-  before securing meaningful value.
+This is an exact combinatorial proof of no modulo/rejection bias. It is distinct from the physical bias claim.
 
----
+## What the fold can and cannot mitigate
 
-## Credits
+If a small physical imbalance is approximately antisymmetric across opposite faces, its first-order contribution cancels when the probabilities of a tuple and its full physical opposite are added.
 
-The 1–32 card-select table — the White/Black-pair → card-number mapping
-used on the CARD SELECT page — was created by
-[@FieldNas](https://x.com/FieldNas) on X. Used here with thanks.
+This is not a universal randomness extractor. It does not guarantee perfect output from arbitrary biased dice. Bias shared by the two faces in an opposite pair, pair-to-pair differences, correlations, changing distributions, deterministic or weak throwing technique, and malicious dice can remain. Exact `1/2048` probabilities require the fair, independent-roll model. See [docs/MATH.md](docs/MATH.md) and [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
 
----
+## Roll-quality and invalid-roll rule
 
-## License
+- Use a hard, flat rolling surface or dice tray and ensure genuine tumbling.
+- Decide the invalid-roll rule before starting.
+- Recommended rule: if either die in a pair roll leaves the accepted area, is cocked, wedged, unreadable, or otherwise invalid, discard that entire pair roll and reroll both dice.
+- Do not selectively reroll repetitions or patterns. Repeated values are valid.
+- Do not restart because generated words look unusual.
 
-Released under **CC0 1.0** (public domain dedication) — see `LICENSE`.
-Print, fork, adapt, and share freely. Bundled fonts are under the SIL Open
-Font License; see `src/fonts/` for details.
+## Reproducible offline build and validation
 
-*Not financial advice. Use at your own risk.*
+Python 3.11 or newer is recommended.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r src/requirements.txt
+
+cd src
+python gen_booklet.py
+python gen_worksheet.py
+python impose_booklet.py
+python -m unittest test_mapping.py
+python -m unittest discover -s ../tools -p 'test_*.py'
+python validate.py
+```
+
+Offline validation checks the local word-list digest, all mathematical invariants, both final-bit extractors, every card grid in both PDFs, the imposed page geometry, and both worksheets. It does not need the internet. An explicitly optional comparison is available with `python validate.py --online-wordlist`.
+
+The checked-in `src/english.txt` has SHA-256:
+
+```text
+2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda
+```
+
+See [docs/VALIDATION.md](docs/VALIDATION.md) for the independence boundary and exact checks.
+
+## Printing and binding
+
+Reader PDFs contain A5 portrait pages in reading order. The print-at-home PDFs impose them two-up on A4 landscape in single-signature saddle-stitch order.
+
+- Duplex: print two-sided, flip on the short edge.
+- Single-sided: print odd PDF pages; flip the whole stack left-to-right without rotating it; reload it the same way up; print even PDF pages.
+- Fold the full stack in half and staple through the spine.
+- Test one sheet first. Printer drivers vary, and scaling/cropping can hide critical labels.
+
+The imposition pads each edition to a multiple of four A5 pages. In the Easy reader, CARD NORMAL pages start on even/left pages and their matching MIRROR pages follow on odd/right pages.
+
+## Security
+
+Statistical quality and secrecy are different. Do not photograph, cloud-sync, retain carelessly, or expose completed worksheets/notes. Use checksum hardware/software offline and verify that it accepts all user-generated entropy rather than silently replacing missing bits. See [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
+
+## Attribution and license
+
+Forked from `bowtiedcrake/2xd8-entropy-booklet`, baseline commit `34168e757ea1eba2a8eab2ac2187da593deb9c84`, itself derived from the Seed Jar Method. Original repository history and attribution are preserved in Git.
+
+Released under CC0 1.0; see `LICENSE`. Bundled Ubuntu Mono fonts retain their SIL Open Font License; see `src/fonts/LICENSE.md`.
+
+Not financial advice. Use at your own risk.

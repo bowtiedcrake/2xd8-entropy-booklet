@@ -1,501 +1,539 @@
 #!/usr/bin/env python3
-"""2XD8 Entropy Booklet — dice-only fork of the Seed Jar Method.
-
-One combined A5-portrait booklet, vintage letterpress, pure B&W:
-cover -> short guide -> card-select table -> 32 word-grid cards.
-
-No tickets, no jar. The same two distinguishable d8 (White / Black) are
-rolled twice per word: once to pick a card (1-32), once to pick a cell
-on that card (row/column, 1-8 each).
-"""
+"""Generate the Easy and Compact opposite-complement-fold booklets."""
 import os
+from collections import Counter
+
+from reportlab.lib.colors import HexColor, black, white
 from reportlab.lib.pagesizes import A5
 from reportlab.lib.units import mm
-from reportlab.pdfgen import canvas
-from reportlab.lib.colors import black, white, HexColor
 from reportlab.pdfbase.pdfmetrics import stringWidth
-from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+
+import fold_mapping as F
 import vintage as V
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-V.register_fonts()
+ROOT = os.path.dirname(HERE)
+WORDS = open(os.path.join(HERE, "english.txt"), encoding="utf-8").read().split()
 
-WORDS = open(os.path.join(HERE, "english.txt")).read().split()
-assert len(WORDS) == 2048 and len(set(WORDS)) == 2048, "wordlist must be 2048 unique words"
+EASY_OUT = os.path.join(ROOT, "2XD8_Entropy_Booklet_OppositeFold_Easy.pdf")
+COMPACT_OUT = os.path.join(ROOT, "2XD8_Entropy_Booklet_OppositeFold_Compact.pdf")
 
-# Card n, cell k (row-major, 8 cols) holds BIP39 index n + 32*k, k = 0..63.
-cards = {n: [n + 32 * k for k in range(64)] for n in range(1, 33)}
-allidx = [i for v in cards.values() for i in v]
-assert len(cards) == 32, "must be 32 cards"
-assert all(len(v) == 64 for v in cards.values()), "each card must have 64 cells"
-assert sorted(allidx) == list(range(1, 2049)), "indices 1..2048 must each appear exactly once"
-assert cards[1][:2] == [1, 33] and cards[9][0] == 9, "mapping sanity check failed"
-assert cards[1][8] == 257, "row-major mapping check failed (row 2 of card 001 should start at 257)"
+PAGE_W, PAGE_H = A5
+GRAY = HexColor("#4A4A4A")
+LIGHT = HexColor("#E7E7E7")
+MID = HexColor("#C9C9C9")
+MARGIN_X = 7 * mm
+MARGIN_TOP = 7 * mm
+MARGIN_BOTTOM = 10 * mm
 
-# Card-select table: card = (white-1)*4 + black_bucket, black_bucket = ceil(black/2).
-# White's full 8 values (3 bits) x Black collapsed into 4 equal-size pairs (2 bits) = 5 bits = 1-of-32.
-def card_for(white, black_pair_idx):
-    return (white - 1) * 4 + black_pair_idx
 
-selector = {(w, b): card_for(w, b) for w in range(1, 9) for b in range(1, 5)}
-assert sorted(selector.values()) == list(range(1, 33)), "selector table must cover 1..32 exactly once"
+def fit(text, font, max_size, max_width, minimum=4.0):
+    size = max_size
+    while size > minimum and stringWidth(text, font, size) > max_width:
+        size -= 0.25
+    return size
 
-PAGE_W, PAGE_H = A5  # 148 x 210mm, portrait
-GRAY = HexColor("#555555")
-BAND = HexColor("#E8E8E8")
 
-MARGIN_TOP = 6 * mm
-MARGIN_SIDE = 6 * mm
-MARGIN_BOTTOM = 11 * mm
-
-ROWS = COLS = 8
-
-def fit(text, font, maxsize, maxw):
-    s = maxsize
-    while s > 4 and stringWidth(text, font, s) > maxw:
-        s -= 0.25
-    return s
-
-def wrap(text, font, size, maxw):
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if stringWidth(trial, font, size) <= maxw:
-            cur = trial
+def wrap(text, font, size, max_width):
+    lines, current = [], ""
+    for word in text.split():
+        trial = (current + " " + word).strip()
+        if not current or stringWidth(trial, font, size) <= max_width:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
-# ---------------------------------------------------------------- frame ----
 
-def frame_bounds():
-    """Inner content bounds (il, ir, it, ib) for any page -- pure geometry,
-    same numbers page_frame() draws into. Kept separate so guide pagination
-    can measure content against the real frame without drawing anything."""
-    x, y = MARGIN_SIDE, MARGIN_BOTTOM
-    w, h = PAGE_W - 2 * MARGIN_SIDE, PAGE_H - MARGIN_TOP - MARGIN_BOTTOM
-    pad = 2.0 * mm
-    il = x + pad + 1.4 * mm; ir = x + w - pad - 1.4 * mm
-    it = y + h - pad - 1.4 * mm; ib = y + pad + 1.4 * mm
-    return il, ir, it, ib
-
-def page_frame(c, footer_text=""):
-    """Content bounds (il, ir, it, ib) + footer, shared by every page.
-    No border box, no corner ornament -- margins only."""
-    il, ir, it, ib = frame_bounds()
-
-    if footer_text:
+def frame(c, footer=""):
+    left, right = MARGIN_X, PAGE_W - MARGIN_X
+    top, bottom = PAGE_H - MARGIN_TOP, MARGIN_BOTTOM
+    if footer:
         c.setFillColor(GRAY)
-        V.spaced(c, PAGE_W / 2, MARGIN_BOTTOM - 5.5 * mm, footer_text, "Mono", 6.4, 0.7)
-    return il, ir, it, ib
+        c.setFont("Mono", 6.3)
+        c.drawCentredString(PAGE_W / 2, 4.5 * mm, footer)
+    return left, right, top, bottom
 
-# ------------------------------------------------------------- cover page --
 
-COVER_ART = os.path.join(HERE, "cover.png")
+def title(c, text, subtitle=None):
+    left, right, top, _ = frame(c)
+    c.setFillColor(black)
+    c.setFont("MonoB", 15)
+    c.drawString(left, top - 7 * mm, text)
+    y = top - 11 * mm
+    if subtitle:
+        c.setFont("MonoI", 8)
+        c.setFillColor(GRAY)
+        c.drawString(left, y, subtitle)
+        y -= 3 * mm
+    V.double_rule(c, left, right, y, thick=1.0, thin=0.35, gap=0.9)
+    return y - 7 * mm
 
-def draw_cover(c):
-    img = ImageReader(COVER_ART)
-    iw, ih = img.getSize()
-    # Full-bleed width, aspect-correct height, centered vertically -- the
-    # art's own aspect ratio is a touch wider than A5 portrait, so it can't
-    # fill the whole page without either cropping or a tiny top/bottom gap;
-    # a gap preserves the whole illustration instead of cutting into it.
-    # No byline footer here -- the art already carries its own title
-    # treatment, and there's no clear space left to put one without
-    # overlapping it.
-    draw_w = PAGE_W
-    draw_h = draw_w * ih / iw
-    y = (PAGE_H - draw_h) / 2
-    c.drawImage(img, 0, y, width=draw_w, height=draw_h, preserveAspectRatio=True, mask="auto")
-    c.showPage()
 
-# ------------------------------------------------------------- guide pages -
+def paragraph(c, text, x, y, width, size=8.7, leading=4.25 * mm, font="Mono"):
+    c.setFont(font, size)
+    c.setFillColor(black)
+    for line in wrap(text, font, size, width):
+        c.drawString(x, y, line)
+        y -= leading
+    return y - 2 * mm
 
-GUIDE = [
-    ("h1", "INTRODUCTION"),
-    ("p", "For secure self-custody, bitcoiners must create seed phrases by generating "
-          "entropy offline rather than trusting computer/hardware random number "
-          "generators."),
-    ("p", "With a pair of d8 dice and this booklet, sufficient offline entropy can be "
-          "generated quickly and easily."),
-    ("p", "Eleven words for a 12-word seed, twenty-three for a 24-word seed. The final word "
-          "is always a checksum computed by your hardware wallet, never drawn by hand — "
-          "see The Checksum Step."),
 
-    ("h1", "WHAT YOU NEED"),
-    ("li", "This booklet"),
-    ("li", "Some pen and paper"),
-    ("li", "A pair of distinguishable d8 (eight-sided) dice — one always White, one "
-           "always Black, never swapped mid-process"),
-    ("li", "A checksum-capable hardware wallet or offline BIP39 tool"),
+def bullet(c, marker, text, x, y, width, size=8.5):
+    c.setFont("MonoB", size)
+    c.drawString(x, y, marker)
+    return paragraph(c, text, x + 7 * mm, y, width - 7 * mm, size=size)
 
-    ("h1", "HOW IT WORKS"),
-    ("num", "Turn to the CARD SELECT table on page 1."),
-    ("num", "Roll both dice. Read White openly, 1–8. Read Black only as a pair: 1/2, "
-            "3/4, 5/6, or 7/8."),
-    ("num", "Cross White against the Black-pair on the table to get a card number, 1–32. "
-            "Turn to that card. For example, if you rolled White 3 and Black 6, you land on "
-            "card 11, so you turn to that page."),
-    ("num", "Roll both dice again. White gives the row, 1–8; Black gives the column, 1–8."),
-    ("num", "Read the word at that row/column and write it down. For example, on Card 1, "
-            "White 6 and Black 6 give you row 6, column 6 — the word there is REDUCE."),
-    ("num", "Repeat from step 2. Do this 11 times for a 12-word seed, or 23 times for a "
-            "24-word seed."),
-    ("num", "Feed your drawn words into your hardware wallet (or an offline BIP39 tool) "
-            "to get the valid final checksum word. Never hand-pick, guess, or re-roll it "
-            "yourself. Do this air-gapped, on a device that has never touched the internet "
-            "with this seed."),
-    ("num", "Enjoy your new seed."),
 
-    ("h1", "THE CHECKSUM STEP"),
-    ("p", "These pages give you raw entropy only, never a finished mnemonic. In BIP39 the "
-          "final word encodes a checksum over every word before it — draw all 12 (or 24) "
-          "words independently and the phrase is only valid about 1 time in 16 (1 in 256 for "
-          "24 words). So: draw 11 or 23 words with this booklet, then let your hardware "
-          "wallet or an offline tool compute the valid final word. Never hand-pick, guess, or "
-          "re-roll it yourself."),
-    ("small", "Released under CC0 1.0 — print, fork, adapt, share freely. Fonts under "
-              "SIL OFL. Not financial advice. Use at your own risk."),
-
-    ("h1", "WHY THE BLACK AND WHITE ARE NOT INTERCHANGEABLE VALUES"),
-    ("p", "White and Black each roll twice per word, but they mean two different things each "
-          "time — a card number on the first roll, a row/column on the second. Keep their "
-          "identity fixed."),
-    ("p", "Repeat, you must NEVER swap which die is White and which is Black mid-process. "
-          "If you do, you collapse two distinct outcomes into one, which breaks the uniform "
-          "1-in-2048 odds and non-linearly COMPROMISES your entropy, making your final "
-          "outputs insecure and unusable."),
-    ("p", "The bit math: two d8 give 6 bits — 64 outcomes, one shy of 2048. So each word "
-          "costs two rolls of the same pair. Roll one narrows 2048 words to 1 of 32 cards, "
-          "using White's full 8 values (3 bits) and Black collapsed into 4 pairs (2 bits) "
-          "— 5 bits. Roll two picks the exact cell on that card, using White as row and "
-          "Black as column, full 8×8 — 6 bits. 5 + 6 = 11 bits = 1-in-2048, exactly "
-          "uniform, no modulo bias — the same two dice doing double duty instead of "
-          "needing a jar, tickets, or a third randomness source."),
-
-    ("h1", "WHY 32 CARDS WITH 64 WORDS EACH"),
-    ("p", "There are 2048 words in the BIP39 list used to generate every English seed "
-          "phrase. 32 cards of 64 words each is the cleanest way to cover all 2048 with a "
-          "booklet you can actually print and flip through — not so many pages it's a "
-          "chore, not so few words per page that you'd still need a stack of loose pieces."),
-    ("p", "There are pre-existing products that sell 1024 or 2048 pieces which work fine, "
-          "but it's impractical to handcraft or mark that many individual pieces yourself."),
-    ("p", "A pair of d8 dice already gives you 64 unique outputs on a grid, so this booklet "
-          "only needed 32 pages to cover the same 2048 words. And because it's bound as a "
-          "booklet instead of loose tickets or tablets, there's nothing to lose track of at "
-          "all — just this book and two d8 dice."),
-]
-
-LINE_H = 4.6 * mm
-SMALL_LINE_H = 3.8 * mm
-TITLE_SIZE = 11.5
-TITLE_LINE_H = 5.5 * mm
-_GIL, _GIR, _, _ = frame_bounds()  # guide content width is the same on every page
-CONTENT_W = _GIR - _GIL
-
-def block_height(kind, text):
-    if kind == "p":
-        return len(wrap(text, "Mono", 9.0, CONTENT_W)) * LINE_H + 2.6 * mm
-    if kind == "li":
-        return len(wrap(text, "Mono", 9.0, CONTENT_W - 5 * mm)) * LINE_H + 1.5 * mm
-    if kind == "num":
-        return len(wrap(text, "Mono", 9.0, CONTENT_W - 7 * mm)) * LINE_H + 1.5 * mm
-    if kind == "small":
-        return len(wrap(text, "MonoI", 7.3, CONTENT_W)) * SMALL_LINE_H
-    raise ValueError(kind)
-
-def header_height(text, at_top):
-    title_lines = len(wrap(text, "MonoB", TITLE_SIZE, CONTENT_W))
-    return (0 if at_top else 4 * mm) + (title_lines - 1) * TITLE_LINE_H + 2.4 * mm + 6.5 * mm
-
-def group_sections(items):
-    """[(h1, [blocks...]), ...] -- pagination breaks between sections, never inside one,
-    unless a single section is too tall for an empty page (falls back to a mid-section break)."""
-    sections = []
+def section(c, heading, items, footer="OPPOSITE-FOLD EASY GUIDE"):
+    left, right, _, bottom = frame(c, footer)
+    y = title(c, heading)
     for kind, text in items:
-        if kind == "h1":
-            sections.append((text, []))
-        else:
-            sections[-1][1].append((kind, text))
-    return sections
-
-def draw_guide(c):
-    il = ir = it = ib = None
-    y = 0
-    num_counter = 0
-
-    def start_page():
-        nonlocal il, ir, it, ib, y
-        il, ir, it, ib = page_frame(c, "2XD8 ENTROPY BOOKLET  ·  GUIDE")
-        y = it - 3 * mm
-
-    def at_top():
-        return y >= it - 3 * mm - 0.01
-
-    def ensure(space):
-        nonlocal y
-        if y - space < ib + 4 * mm:
-            c.showPage(); start_page()
-
-    def draw_header(text):
-        nonlocal y
-        top = at_top()
-        if not top:
-            y -= 4 * mm
-        lines = wrap(text, "MonoB", TITLE_SIZE, ir - il)
-        c.setFillColor(black); c.setFont("MonoB", TITLE_SIZE)
-        for i, ln in enumerate(lines):
-            c.drawString(il, y, ln)
-            if i < len(lines) - 1:
-                y -= TITLE_LINE_H
-        y -= 2.4 * mm
-        V.double_rule(c, il, ir, y, thick=0.9, thin=0.32, gap=0.8)
-        y -= 6.5 * mm
-
-    def draw_block(kind, text):
-        nonlocal y, num_counter
-        if kind == "p":
-            lines = wrap(text, "Mono", 9.0, ir - il)
-            ensure(len(lines) * LINE_H + 2 * mm)
-            c.setFont("Mono", 9.0); c.setFillColor(black)
-            for ln in lines:
-                c.drawString(il, y, ln); y -= LINE_H
-            y -= 2.6 * mm
+        if kind == "h":
+            y -= 1.5 * mm
+            c.setFillColor(black)
+            c.setFont("MonoB", 10.5)
+            c.drawString(left, y, text)
+            y -= 5.5 * mm
+        elif kind == "p":
+            y = paragraph(c, text, left, y, right - left)
+        elif kind == "warn":
+            lines = wrap(text, "MonoB", 8.5, right - left - 7 * mm)
+            height = (len(lines) * 4.2 + 6) * mm
+            c.setFillColor(LIGHT)
+            c.rect(left, y - height + 2 * mm, right - left, height, stroke=1, fill=1)
+            c.setFillColor(black)
+            c.setFont("MonoB", 8.5)
+            yy = y - 2.5 * mm
+            for line in lines:
+                c.drawString(left + 3.5 * mm, yy, line)
+                yy -= 4.2 * mm
+            y -= height + 2 * mm
         elif kind == "li":
-            lines = wrap(text, "Mono", 9.0, ir - il - 5 * mm)
-            ensure(len(lines) * LINE_H + 1.5 * mm)
-            c.setFont("Mono", 9.0); c.setFillColor(black)
-            c.drawString(il, y, "•")
-            for ln in lines:
-                c.drawString(il + 5 * mm, y, ln); y -= LINE_H
-            y -= 1.5 * mm
+            y = bullet(c, "-", text, left, y, right - left)
         elif kind == "num":
-            num_counter += 1
-            lines = wrap(text, "Mono", 9.0, ir - il - 7 * mm)
-            ensure(len(lines) * LINE_H + 1.5 * mm)
-            c.setFont("MonoB", 9.0); c.setFillColor(black)
-            c.drawString(il, y, f"{num_counter}.")
-            c.setFont("Mono", 9.0)
-            for ln in lines:
-                c.drawString(il + 7 * mm, y, ln); y -= LINE_H
-            y -= 1.5 * mm
-        elif kind == "small":
-            lines = wrap(text, "MonoI", 7.3, ir - il)
-            ensure(len(lines) * SMALL_LINE_H)
-            c.setFont("MonoI", 7.3); c.setFillColor(GRAY)
-            for ln in lines:
-                c.drawString(il, y, ln); y -= SMALL_LINE_H
-
-    start_page()
-    page_h = it - ib
-    for header, blocks in group_sections(GUIDE):
-        num_counter = 0
-        blocks_h = sum(block_height(k, t) for k, t in blocks)
-        total_mid = header_height(header, at_top=False) + blocks_h
-        total_top = header_height(header, at_top=True) + blocks_h
-        # Keep a section whole on one page unless it can't possibly fit an
-        # empty page either -- then fall back to letting it break mid-section
-        # (per-block `ensure` calls below still guarantee no overlap with the
-        # frame) rather than orphaning a header or a trailing line alone.
-        if not at_top() and y - total_mid < ib + 4 * mm and total_top <= page_h:
-            c.showPage(); start_page()
-        draw_header(header)
-        for kind, text in blocks:
-            draw_block(kind, text)
+            number, body = text.split("|", 1)
+            y = bullet(c, number + ".", body, left, y, right - left)
+        if y < bottom + 3 * mm:
+            raise RuntimeError(f"guide page overflow: {heading}")
     c.showPage()
 
-# ----------------------------------------------------------- selector page -
 
-def draw_select_grid(c, tab_left, tab_right, zone_top, zone_bot, scale=1.0, side_labels=True):
-    """The White/Black -> card lookup grid. `scale` shrinks every tuned
-    dimension and font size uniformly from the CARD SELECT page's own
-    numbers, so a reduced copy (e.g. on the cover) is a faithful miniature
-    rather than a separately re-tuned approximation. Returns grid_bot."""
-    tab_w = tab_right - tab_left
-    col_w = tab_w / 4  # 4 black-pair columns
-    header_h = 9 * mm * scale
-    max_row_h = 15 * mm * scale
+def draw_cover(c, edition):
+    c.setFillColor(black)
+    c.rect(0, 0, PAGE_W, PAGE_H, stroke=0, fill=1)
+    c.setFillColor(white)
+    c.setFont("MonoB", 22)
+    c.drawCentredString(PAGE_W / 2, 153 * mm, "2XD8 ENTROPY")
+    c.drawCentredString(PAGE_W / 2, 142 * mm, "BOOKLET")
+    c.setLineWidth(1.1)
+    c.line(22 * mm, 134 * mm, PAGE_W - 22 * mm, 134 * mm)
+    c.setFont("MonoB", 14)
+    c.drawCentredString(PAGE_W / 2, 117 * mm, "OPPOSITE-COMPLEMENT FOLD")
+    c.setFont("Mono", 10)
+    c.drawCentredString(PAGE_W / 2, 106 * mm, edition)
+    c.setFont("Mono", 8)
+    c.drawCentredString(PAGE_W / 2, 75 * mm, "TWO DISTINGUISHABLE STANDARD D8 DICE")
+    c.drawCentredString(PAGE_W / 2, 68 * mm, "PHYSICAL ENTROPY - OFFLINE CHECKSUM")
+    c.setFont("MonoB", 8.5)
+    c.drawCentredString(PAGE_W / 2, 41 * mm, "VERIFY BOTH DICE BEFORE USE")
+    c.setFont("Mono", 7.5)
+    c.drawCentredString(PAGE_W / 2, 34 * mm, "OPPOSITES: 1<->8  2<->7  3<->6  4<->5")
+    c.setFont("Mono", 6.5)
+    c.drawCentredString(PAGE_W / 2, 12 * mm, "CC0 1.0 - FOR AUDITABLE OFFLINE USE")
+    c.showPage()
 
-    avail_h = zone_top - zone_bot
-    grid_h = min(avail_h - header_h, max_row_h * 8)
-    row_h = grid_h / 8
-    top_pad = (avail_h - header_h - grid_h) / 2
 
-    header_y = zone_top - top_pad - header_h  # bottom edge of the header band
-    grid_top = header_y
-    grid_bot = grid_top - grid_h
+def draw_guide_pages(c):
+    section(c, "BEFORE YOU START", [
+        ("warn", "INSPECT BOTH ACTUAL DICE. Verify that opposite faces are 1<->8, 2<->7, 3<->6, and 4<->5. If either die differs, do not use this edition."),
+        ("li", "Use two visually distinguishable d8 dice. Assign one permanently as WHITE and one as BLACK."),
+        ("li", "Use a hard, flat rolling area or dice tray and ensure genuine tumbling."),
+        ("li", "Precommit this invalid-roll rule: if either die is off-table, cocked, wedged, or unreadable, discard that entire pair roll and reroll both dice."),
+        ("li", "Repeated values and apparent patterns are valid. Never selectively reroll a result because it looks suspicious."),
+        ("warn", "If you lose CARD or MODE before the second roll, discard that incomplete word attempt and restart from the first pair roll."),
+    ])
+    section(c, "GENERATE ONE FULL WORD", [
+        ("num", "1|Roll WHITE and BLACK together."),
+        ("num", "2|Use the CARD SELECT table with the actual readings."),
+        ("num", "3|Record both the CARD number and the full word NORMAL or MIRROR."),
+        ("num", "4|Turn to exactly that CARD / MODE page."),
+        ("num", "5|Roll WHITE and BLACK together again."),
+        ("num", "6|Use the actual WHITE result as the row and actual BLACK result as the column."),
+        ("num", "7|Read and record the printed word. The small number is its one-based BIP39 index for auditing."),
+        ("warn", "There is no subtraction, binary arithmetic, modulo, or die-face conversion in this ordinary workflow."),
+    ])
+    section(c, "FINAL ENTROPY + CHECKSUM", [
+        ("h", "24 WORDS"),
+        ("p", "Generate 23 full word indices: 253 entropy bits. Then use the FINAL 3 BITS table for one additional physical WHITE+BLACK pair roll. Those 3 bits complete the 256-bit entropy."),
+        ("h", "12 WORDS"),
+        ("p", "Generate 11 full word indices: 121 entropy bits. Then use the FINAL 7 BITS procedure: one CARD SELECT pair roll plus one additional WHITE-only roll. Those 7 bits complete the 128-bit entropy."),
+        ("h", "CHECKSUM"),
+        ("p", "A deterministic offline checksum tool hashes the completed 128- or 256-bit entropy, takes the first 4 or 8 hash bits, and combines them with the final physical entropy bits to select the last word."),
+        ("warn", "The checksum tool is allowed to calculate; it is not allowed to contribute randomness."),
+    ])
+    section(c, "WORKED EXAMPLES", [
+        ("h", "NORMAL"),
+        ("p", "First roll WHITE 2, BLACK 7 gives CARD 15 - NORMAL. Second roll WHITE 6, BLACK 3: turn to CARD 015 NORMAL, use actual row 6 and column 3, and read PREFER (BIP39 index 1359)."),
+        ("h", "MIRROR"),
+        ("p", "First roll WHITE 7, BLACK 2 gives CARD 15 - MIRROR. Second roll WHITE 3, BLACK 8: turn to CARD 015 MIRROR, use actual row 3 and column 8, and read PEACE (BIP39 index 1295)."),
+        ("warn", "On a MIRROR page, actual die values are still used directly. The printed page already performs the fold."),
+        ("p", "Keep WHITE and BLACK roles fixed so the mapping remains deterministic and auditable. If their identities become uncertain during a word, restart that word attempt."),
+    ])
+    section(c, "WHAT THE FOLD PROVES", [
+        ("h", "EXACT FAIR-DICE RESULT"),
+        ("p", "Every four-reading tuple is paired with the tuple obtained by replacing every face with its physical opposite. There are no fixed points. The 4,096 raw tuples therefore form 2,048 pairs, and each pair maps to one BIP39 index: exactly 2/4,096 = 1/2,048 under fair independent rolls. This proves no modulo or rejection bias."),
+        ("h", "LIMITED BIAS MITIGATION"),
+        ("p", "If a small imbalance is approximately antisymmetric across physical opposite faces, first-order terms from that component cancel when paired tuple probabilities are added."),
+        ("p", "This does not make arbitrary biased dice perfect. Pair-symmetric bias, pair-to-pair differences, changing distributions, correlation, deterministic throwing, and weak technique can remain. Dice quality still matters. This is not a general-purpose randomness extractor."),
+        ("warn", "Exact 1/2,048 output probabilities require the fair, independent-roll model."),
+    ])
 
-    label_size = 8.5 * scale
-    pair_size = 9 * scale
-    num_size = 13 * scale
 
-    if side_labels:
-        c.setFont("MonoB", label_size); c.setFillColor(black)
-        c.drawCentredString((tab_left + tab_right) / 2, header_y + header_h + 3 * mm * scale,
-                             "BLACK D8")
-        c.saveState()
-        c.translate(tab_left - 10 * mm * scale, (grid_top + grid_bot) / 2)
-        c.rotate(90)
-        c.setFont("MonoB", label_size)
-        c.drawCentredString(0, 0, "WHITE D8")
-        c.restoreState()
+def selector_data():
+    return [[F.selector_cell(w, b) for b in range(1, 9)] for w in range(1, 9)]
 
-    # header band (black-pair labels)
-    c.setFillColor(BAND)
-    c.rect(tab_left, header_y, tab_w, header_h, stroke=0, fill=1)
-    pair_labels = ["1 / 2", "3 / 4", "5 / 6", "7 / 8"]
-    for j, lbl in enumerate(pair_labels):
-        cxx = tab_left + (j + 0.5) * col_w
-        c.setFont("MonoB", pair_size); c.setFillColor(black)
-        c.drawCentredString(cxx, header_y + header_h / 2 - 1.4 * mm * scale, lbl)
-        if j > 0:
-            c.setStrokeColor(black); c.setLineWidth(0.5)
-            c.line(tab_left + j * col_w, header_y, tab_left + j * col_w, header_y + header_h)
-
-    # row banding, alternating white rows shaded light grey
-    c.setFillColor(BAND)
-    for i in range(8):
-        if (i + 1) % 2 == 0:
-            c.rect(tab_left, grid_top - (i + 1) * row_h, tab_w, row_h, stroke=0, fill=1)
-
-    # grid lines
-    c.setStrokeColor(black)
-    for i in range(9):
-        yy = grid_top - i * row_h
-        c.setLineWidth(1.2 if i in (0, 8) else 0.35)
-        c.line(tab_left, yy, tab_right, yy)
-    for j in range(5):
-        xx = tab_left + j * col_w
-        c.setLineWidth(1.2 if j in (0, 4) else 0.35)
-        c.line(xx, grid_top, xx, grid_bot)
-
-    # outer frame around header + grid together
-    c.setLineWidth(1.6)
-    c.rect(tab_left, grid_bot, tab_w, header_y + header_h - grid_bot)
-
-    # row labels + card numbers
-    for i in range(8):
-        white = i + 1
-        ry = grid_top - (i + 0.5) * row_h
-        if side_labels:
-            c.setFont("MonoB", pair_size); c.setFillColor(black)
-            c.drawCentredString(tab_left - 5 * mm * scale, ry - 1.3 * scale, str(white))
-        for j in range(4):
-            card_n = selector[(white, j + 1)]
-            cxx = tab_left + (j + 0.5) * col_w
-            c.setFont("MonoB", num_size); c.setFillColor(black)
-            c.drawCentredString(cxx, ry - 1.6 * scale, f"{card_n}")
-
-    return grid_bot
 
 def draw_selector(c):
-    il, ir, it, ib = page_frame(
-        c, "CARD SELECT  ·  WHITE = ROW OF TABLE  ·  BLACK = COLUMN PAIR")
-    cx = (il + ir) / 2
+    left, right, top, bottom = frame(c, "ACTUAL FIRST ROLL - READ CARD AND FULL MODE")
+    y = title(c, "CARD SELECT", "Rows = actual WHITE; columns = actual BLACK")
+    label_w = 8 * mm
+    grid_left = left + label_w
+    grid_right = right
+    grid_top = y - 7 * mm
+    header_h = 8 * mm
+    grid_bottom = bottom + 12 * mm
+    row_h = (grid_top - header_h - grid_bottom) / 8
+    col_w = (grid_right - grid_left) / 8
 
-    V.spaced(c, cx, it - 9 * mm, "CARD SELECT", "MonoB", 12.5, 2.0)
-    V.double_rule(c, il + 8 * mm, ir - 8 * mm, it - 13.5 * mm, thick=1.0, thin=0.35, gap=0.9)
+    c.setFillColor(LIGHT)
+    c.rect(grid_left, grid_top - header_h, grid_right - grid_left, header_h, stroke=0, fill=1)
+    for column in range(8):
+        c.setFont("MonoB", 8)
+        c.setFillColor(black)
+        c.drawCentredString(grid_left + (column + .5) * col_w, grid_top - 5.2 * mm, str(column + 1))
+    c.setFont("MonoB", 7)
+    c.drawCentredString((grid_left + grid_right) / 2, grid_top + 2 * mm, "ACTUAL BLACK")
 
-    tab_left = il + 15 * mm  # 10mm label width + 5mm gap, room for the rotated WHITE D8 label
-    tab_right = ir - 5 * mm
-    zone_top = it - 24 * mm
-    zone_bot = ib + 15 * mm
-
-    grid_bot = draw_select_grid(c, tab_left, tab_right, zone_top, zone_bot)
-
-    c.setFont("MonoI", 7.5); c.setFillColor(GRAY)
-    c.drawCentredString(cx, grid_bot - 8 * mm,
-                         "Example: White 3, Black 6 -> row 3, pair 5/6 -> card 11.")
-    c.drawCentredString(cx, grid_bot - 12 * mm,
-                         "Card-select table by @FieldNas on X.")
-    c.showPage()
-
-# ------------------------------------------------------------ card pages ---
-
-def draw_card(c, n):
-    il, ir, it, ib = page_frame(c, f"WHITE = ROW  ·  BLACK = COLUMN  ·  CARD {n:03d} OF 032")
-    cx = (il + ir) / 2
-
-    V.spaced(c, cx, it - 6.6 * mm, "CARD", "MonoB", 9.5, 1.8)
-    V.spaced(c, cx - 9.5 * mm, it - 12.4 * mm, "Nº", "MonoI", 9, 0)
-    c.setFont("MonoB", 17); c.setFillColor(black)
-    c.drawString(cx - 3.5 * mm, it - 13.7 * mm, f"{n:03d}")
-    V.double_rule(c, il + 3 * mm, ir - 3 * mm, it - 15.8 * mm, thick=1.0, thin=0.35, gap=0.9)
-
-    zone_top = it - 19.0 * mm
-    zone_bot = ib + 9.0 * mm
-    top_labels_h = 5.2 * mm
-    bot_labels_h = 5.2 * mm
-    left_labels_w = 6.5 * mm
-    right_labels_w = 6.5 * mm
-
-    avail_h = (zone_top - top_labels_h) - (zone_bot + bot_labels_h)
-    MAX_ROW_H = 14.5 * mm
-    gh = min(avail_h, MAX_ROW_H * 8)
-    gtop = zone_top - top_labels_h - (avail_h - gh) / 2
-    gbot = gtop - gh
-
-    gx = il + left_labels_w
-    grx = ir - right_labels_w
-    gw = grx - gx
-    cw, ch = gw / COLS, gh / ROWS
-
-    c.setFillColor(BAND)
-    for i in range(ROWS):
-        if (i + 1) % 2 == 0:
-            c.rect(gx, gtop - (i + 1) * ch, gw, ch, stroke=0, fill=1)
+    data = selector_data()
+    body_top = grid_top - header_h
+    for row in range(8):
+        y0 = body_top - (row + 1) * row_h
+        c.setFillColor(LIGHT if row >= 4 else white)
+        c.rect(grid_left, y0, grid_right - grid_left, row_h, stroke=0, fill=1)
+        c.setFillColor(black)
+        c.setFont("MonoB", 8)
+        c.drawCentredString(left + label_w / 2, y0 + row_h / 2 - 2, str(row + 1))
+        for column in range(8):
+            card, mode = data[row][column]
+            x = grid_left + (column + .5) * col_w
+            c.setFont("MonoB", 7.2)
+            c.drawCentredString(x, y0 + row_h / 2 + 1.2, f"{card:02d}")
+            c.setFont("MonoB" if mode == F.MIRROR else "Mono", 5.8)
+            c.drawCentredString(x, y0 + row_h / 2 - 5.2, mode)
+            if mode == F.MIRROR:
+                c.setLineWidth(.35)
+                for hatch in range(3):
+                    hx = grid_left + column * col_w + 1.5 + hatch * 3.5
+                    c.line(hx, y0 + 1.2, min(hx + 3, grid_left + (column + 1) * col_w - 1), y0 + 4.2)
 
     c.setStrokeColor(black)
-    for i in range(ROWS + 1):
-        yy = gtop - i * ch
-        c.setLineWidth(1.4 if i % 4 == 0 else 0.35)
-        c.line(gx, yy, gx + gw, yy)
-    for j in range(COLS + 1):
-        xx = gx + j * cw
-        c.setLineWidth(1.4 if j % 4 == 0 else 0.35)
-        c.line(xx, gtop, xx, gtop - gh)
-
-    for j in range(COLS):
-        num = str(j + 1)
-        cxx = gx + (j + 0.5) * cw
-        V.spaced(c, cxx, gtop + 1.1 * mm, num, "MonoI", 7.5, 0, color=GRAY)
-        V.spaced(c, cxx, gbot - 4.0 * mm, num, "MonoI", 7.5, 0, color=GRAY)
-    for i in range(ROWS):
-        num = str(i + 1)
-        cyy = gtop - (i + 0.5) * ch - 1.3
-        V.spaced(c, gx - 3.6 * mm, cyy, num, "MonoI", 7.5, 0, color=GRAY)
-        V.spaced(c, grx + 3.6 * mm, cyy, num, "MonoI", 7.5, 0, color=GRAY)
-
-    for k, idx in enumerate(cards[n]):
-        i, j = divmod(k, COLS)
-        wx = gx + (j + 0.5) * cw; wy = gtop - (i + 0.5) * ch
-        word = WORDS[idx - 1]
-        fs = fit(word, "MonoB", 10.0, cw - 2.0 * mm)
-        c.setFillColor(black); c.setFont("MonoB", fs)
-        c.drawCentredString(wx, wy + 0.6 * mm, word)
-        c.setFillColor(GRAY); c.setFont("Mono", 5.4)
-        c.drawCentredString(wx, wy - 4.0 * mm, f"{idx:04d}")
-
-    V.spaced(c, cx, ib + 1.6 * mm, "OFFICIAL BIP39 ENGLISH LIST", "Mono", 5.0, 0.6, color=GRAY)
+    for row in range(9):
+        yy = body_top - row * row_h
+        c.setLineWidth(1 if row in (0, 4, 8) else .3)
+        c.line(grid_left, yy, grid_right, yy)
+    for column in range(9):
+        xx = grid_left + column * col_w
+        c.setLineWidth(1 if column in (0, 8) else .3)
+        c.line(xx, grid_bottom, xx, grid_top)
+    c.setLineWidth(1.2)
+    c.rect(grid_left, grid_bottom, grid_right - grid_left, grid_top - grid_bottom)
+    c.saveState()
+    c.translate(left + 2.5 * mm, (body_top + grid_bottom) / 2)
+    c.rotate(90)
+    c.setFont("MonoB", 7)
+    c.drawCentredString(0, 0, "ACTUAL WHITE")
+    c.restoreState()
     c.showPage()
 
-# --------------------------------------------------------------- assemble --
 
-OUT = os.path.join(HERE, "..", "2XD8_Entropy_Booklet.pdf")
-c = canvas.Canvas(OUT, pagesize=A5)
-c.setTitle("2XD8 Entropy Booklet")
-c.setSubject("Offline BIP39 Entropy — Two Dice, Thirty-Two Cards, Nothing Else")
+def draw_final3(c):
+    left, right, top, bottom = frame(c, "24 WORDS - PHYSICAL FINAL 3 ENTROPY BITS")
+    y = title(c, "FINAL 3 BITS", "After 23 full words, roll WHITE + BLACK once")
+    y = paragraph(c, "Use the actual WHITE row and actual BLACK column. Record the printed three bits. This completes all 256 entropy bits before checksum calculation.", left, y, right - left, size=8.2)
+    label_w = 8 * mm
+    grid_left, grid_right = left + label_w, right
+    grid_top, grid_bottom = y - 6 * mm, bottom + 13 * mm
+    header_h = 7 * mm
+    body_top = grid_top - header_h
+    row_h = (body_top - grid_bottom) / 8
+    col_w = (grid_right - grid_left) / 8
+    c.setFillColor(LIGHT)
+    c.rect(grid_left, body_top, grid_right - grid_left, header_h, stroke=0, fill=1)
+    for b in range(1, 9):
+        c.setFont("MonoB", 8)
+        c.setFillColor(black)
+        c.drawCentredString(grid_left + (b - .5) * col_w, body_top + 2.2 * mm, str(b))
+    for w in range(1, 9):
+        y0 = body_top - w * row_h
+        c.setFillColor(LIGHT if w > 4 else white)
+        c.rect(grid_left, y0, grid_right - grid_left, row_h, stroke=0, fill=1)
+        c.setFillColor(black)
+        c.setFont("MonoB", 8)
+        c.drawCentredString(left + label_w / 2, y0 + row_h / 2 - 2, str(w))
+        for b in range(1, 9):
+            c.setFont("MonoB", 8.2)
+            c.drawCentredString(grid_left + (b - .5) * col_w, y0 + row_h / 2 - 2, F.final3_for_pair(w, b))
+    c.setStrokeColor(black)
+    for i in range(9):
+        yy = body_top - i * row_h
+        c.setLineWidth(1 if i in (0, 4, 8) else .3)
+        c.line(grid_left, yy, grid_right, yy)
+    for j in range(9):
+        xx = grid_left + j * col_w
+        c.setLineWidth(1 if j in (0, 8) else .3)
+        c.line(xx, grid_bottom, xx, grid_top)
+    c.setLineWidth(1.2)
+    c.rect(grid_left, grid_bottom, grid_right - grid_left, grid_top - grid_bottom)
+    c.setFont("MonoB", 6.5)
+    c.drawCentredString((grid_left + grid_right) / 2, grid_top + 2 * mm, "ACTUAL BLACK")
+    c.saveState(); c.translate(left + 2.5 * mm, (body_top + grid_bottom) / 2); c.rotate(90)
+    c.drawCentredString(0, 0, "ACTUAL WHITE"); c.restoreState()
+    c.showPage()
 
-draw_cover(c)
-draw_selector(c)
-draw_guide(c)
-for n in range(1, 33):
-    draw_card(c, n)
 
-c.save()
-print("OK booklet ->", os.path.relpath(OUT))
+def draw_final7_page(c, first_card, last_card, instructions):
+    left, right, top, bottom = frame(c, "12 WORDS - PHYSICAL FINAL 7 ENTROPY BITS")
+    y = title(c, "FINAL 7 BITS", f"Direct lookup - cards {first_card:02d} through {last_card:02d}")
+    y = paragraph(c, instructions, left, y, right - left, size=7.8, leading=3.7 * mm)
+    c.setFont("MonoB", 7.5)
+    c.drawString(left, y, "ACTUAL WHITE:     1/2      3/4      5/6      7/8")
+    y -= 4.5 * mm
+    c.setFont("Mono", 7.5)
+    c.drawString(left, y, "NORMAL ->         00       01       10       11")
+    y -= 4 * mm
+    c.setFont("MonoB", 7.5)
+    c.drawString(left, y, "MIRROR ->         11       10       01       00")
+    y -= 6 * mm
+    table_top = y
+    table_bottom = bottom + 4 * mm
+    card_count = last_card - first_card + 1
+    row_h = (table_top - table_bottom) / (card_count + 1)
+    widths = [13 * mm, 17 * mm] + [(right - left - 30 * mm) / 4] * 4
+    xs = [left]
+    for width in widths:
+        xs.append(xs[-1] + width)
+    c.setFillColor(LIGHT); c.rect(left, table_top - row_h, right - left, row_h, stroke=0, fill=1)
+    headers = ["CARD", "FIRST 5", "00", "01", "10", "11"]
+    for col, header in enumerate(headers):
+        c.setFillColor(black); c.setFont("MonoB", 7.2)
+        c.drawCentredString((xs[col] + xs[col + 1]) / 2, table_top - row_h + row_h / 2 - 2, header)
+    for position, card in enumerate(range(first_card, last_card + 1), 1):
+        y0 = table_top - (position + 1) * row_h
+        if card % 2 == 0:
+            c.setFillColor(HexColor("#F2F2F2")); c.rect(left, y0, right - left, row_h, stroke=0, fill=1)
+        values = [f"{card:02d}", f"{card - 1:05b}"] + [f"{((card - 1) << 2) | pair:07b}" for pair in range(4)]
+        for col, value in enumerate(values):
+            c.setFillColor(black); c.setFont("MonoB" if col >= 2 else "Mono", 7.2)
+            c.drawCentredString((xs[col] + xs[col + 1]) / 2, y0 + row_h / 2 - 2, value)
+    c.setStrokeColor(black)
+    for row in range(card_count + 2):
+        yy = table_top - row * row_h
+        c.setLineWidth(.8 if row in (0, 1, card_count + 1) else .2)
+        c.line(left, yy, right, yy)
+    for xx in xs:
+        c.setLineWidth(.7); c.line(xx, table_bottom, xx, table_top)
+    c.showPage()
+
+
+def draw_final7(c):
+    draw_final7_page(
+        c, 1, 16,
+        "After 11 full words: 1. Roll WHITE+BLACK and use CARD SELECT; keep CARD and MODE. 2. Roll WHITE only; BLACK is not rolled and no second Black result is used. 3. Use the mode row to choose a 2-bit column. 4. Cross CARD and that column; record the direct 7-bit result.",
+    )
+    draw_final7_page(
+        c, 17, 32,
+        "Continue here when CARD SELECT returned card 17 through 32. Use the recorded NORMAL/MIRROR mode and the actual WHITE-only second result. Do not concatenate or convert values: the bold seven-bit cell is the final physical entropy output.",
+    )
+
+
+def draw_blank(c, text="CARD SECTION STARTS ON THE NEXT PAGE"):
+    c.setFont("MonoI", 7)
+    c.setFillColor(GRAY)
+    c.drawCentredString(PAGE_W / 2, PAGE_H / 2, text)
+    c.showPage()
+
+
+def grid_geometry(left, right, top, bottom, compact=False):
+    zone_top = top - (29 if compact else 31) * mm
+    zone_bottom = bottom + 11 * mm
+    label = 7 * mm if compact else 6 * mm
+    grid_left, grid_right = left + label, right - label
+    grid_top, grid_bottom = zone_top - label, zone_bottom + label
+    return grid_left, grid_right, grid_top, grid_bottom, label
+
+
+def draw_word_grid(c, card, indices, compact=False):
+    left, right, top, bottom = frame(c)
+    grid_left, grid_right, grid_top, grid_bottom, label = grid_geometry(left, right, top, bottom, compact)
+    cell_w = (grid_right - grid_left) / 8
+    cell_h = (grid_top - grid_bottom) / 8
+    c.setFillColor(LIGHT)
+    for row in range(8):
+        if row % 2:
+            c.rect(grid_left, grid_top - (row + 1) * cell_h, grid_right - grid_left, cell_h, stroke=0, fill=1)
+    c.setStrokeColor(black)
+    for row in range(9):
+        yy = grid_top - row * cell_h
+        c.setLineWidth(1.1 if row in (0, 4, 8) else .3)
+        c.line(grid_left, yy, grid_right, yy)
+    for col in range(9):
+        xx = grid_left + col * cell_w
+        c.setLineWidth(1.1 if col in (0, 4, 8) else .3)
+        c.line(xx, grid_bottom, xx, grid_top)
+    for offset, index in enumerate(indices):
+        row, col = divmod(offset, 8)
+        x = grid_left + (col + .5) * cell_w
+        y = grid_top - (row + .5) * cell_h
+        word = WORDS[index - 1]
+        c.setFillColor(black); c.setFont("MonoB", fit(word, "MonoB", 9.1, cell_w - 1.2 * mm))
+        c.drawCentredString(x, y + 1.1 * mm, word)
+        c.setFillColor(GRAY); c.setFont("Mono", 5.1)
+        c.drawCentredString(x, y - 3.0 * mm, f"{index:04d}")
+    return grid_left, grid_right, grid_top, grid_bottom, cell_w, cell_h
+
+
+def draw_easy_card(c, card, mode):
+    left, right, top, bottom = frame(c, f"CARD {card:03d} - {mode} - WHITE = ROW - BLACK = COLUMN")
+    c.setFillColor(LIGHT if mode == F.MIRROR else white)
+    c.rect(left, top - 25 * mm, right - left, 23 * mm, stroke=1, fill=1)
+    c.setFillColor(black); c.setFont("MonoB", 18)
+    c.drawString(left + 4 * mm, top - 10 * mm, f"CARD {card:03d}")
+    c.setFont("MonoB", 16)
+    c.drawRightString(right - 4 * mm, top - 10 * mm, mode)
+    c.setFont("MonoB", 7.3)
+    c.drawCentredString((left + right) / 2, top - 17 * mm, "SECOND ROLL: ACTUAL WHITE = ROW / ACTUAL BLACK = COLUMN")
+    c.setFont("MonoB" if mode == F.MIRROR else "Mono", 6.8)
+    c.drawCentredString((left + right) / 2, top - 22 * mm, f"USE THIS PAGE ONLY IF SELECTOR SAID {mode}")
+    indices = F.page_indices(card, mode)
+    gl, gr, gt, gb, cw, ch = draw_word_grid(c, card, indices)
+    for col in range(8):
+        x = gl + (col + .5) * cw
+        c.setFillColor(black); c.setFont("MonoB", 7.5)
+        c.drawCentredString(x, gt + 2.3 * mm, str(col + 1))
+    for row in range(8):
+        y = gt - (row + .5) * ch - 2
+        c.setFillColor(black); c.setFont("MonoB", 7.5)
+        c.drawCentredString(gl - 3.2 * mm, y, str(row + 1))
+        c.drawCentredString(gr + 3.2 * mm, y, str(row + 1))
+    c.setFont("MonoB", 6.2); c.drawCentredString((gl + gr) / 2, gt + 6.4 * mm, "ACTUAL BLACK")
+    c.saveState(); c.translate(gl - 6.3 * mm, (gt + gb) / 2); c.rotate(90)
+    c.drawCentredString(0, 0, "ACTUAL WHITE"); c.restoreState()
+    c.showPage()
+
+
+def draw_compact_card(c, card):
+    left, right, top, bottom = frame(c, f"CARD {card:03d} - COMPACT DUAL COORDINATES")
+    c.setFillColor(black); c.setFont("MonoB", 17)
+    c.drawString(left, top - 9 * mm, f"CARD {card:03d}")
+    c.setFont("MonoB", 8.2); c.drawRightString(right, top - 7 * mm, "COMPACT / ADVANCED")
+    c.setFont("Mono", 6.7)
+    c.drawRightString(right, top - 12 * mm, "NORMAL: LEFT row + TOP column")
+    c.setFont("MonoB", 6.7)
+    c.drawRightString(right, top - 17 * mm, "MIRROR: RIGHT row + BOTTOM column")
+    c.setFont("Mono", 6.3)
+    c.drawString(left, top - 22 * mm, "Use actual second-roll values; choose only the labels for your mode.")
+    indices = F.canonical_card_indices(card)
+    gl, gr, gt, gb, cw, ch = draw_word_grid(c, card, indices, compact=True)
+    for col in range(8):
+        x = gl + (col + .5) * cw
+        c.setFont("Mono", 7.2); c.setFillColor(black)
+        c.drawCentredString(x, gt + 2.1 * mm, str(col + 1))
+        c.setFont("MonoB", 7.2)
+        c.drawCentredString(x, gb - 4.4 * mm, str(8 - col))
+    for row in range(8):
+        y = gt - (row + .5) * ch - 2
+        c.setFont("Mono", 7.2); c.drawCentredString(gl - 3.6 * mm, y, str(row + 1))
+        c.setFont("MonoB", 7.2); c.drawCentredString(gr + 3.6 * mm, y, str(8 - row))
+    c.setFont("Mono", 5.8); c.drawCentredString((gl + gr) / 2, gt + 6.1 * mm, "NORMAL TOP - ACTUAL BLACK")
+    c.setFont("MonoB", 5.8); c.drawCentredString((gl + gr) / 2, gb - 8.4 * mm, "MIRROR BOTTOM - ACTUAL BLACK")
+    c.showPage()
+
+
+def build_easy_pages():
+    return [(card, mode, F.page_indices(card, mode)) for card in range(1, 33) for mode in F.MODES]
+
+
+def build_compact_pages():
+    return [(card, F.canonical_card_indices(card)) for card in range(1, 33)]
+
+
+def self_check():
+    assert len(WORDS) == 2048 and len(set(WORDS)) == 2048
+    F.assert_core_invariants()
+    easy = build_easy_pages()
+    assert len(easy) == 64
+    assert {(card, mode) for card, mode, _ in easy} == {(card, mode) for card in range(1, 33) for mode in F.MODES}
+    assert all(len(indices) == 64 for _, _, indices in easy)
+    compact = build_compact_pages()
+    assert len(compact) == 32 and all(len(indices) == 64 for _, indices in compact)
+    assert sorted(index for _, indices in compact for index in indices) == list(range(1, 2049))
+    selector = selector_data()
+    assert len(selector) == 8 and all(len(row) == 8 for row in selector)
+    assert Counter(card for row in selector[:4] for card, mode in row) == Counter(range(1, 33))
+    assert Counter(card for row in selector[4:] for card, mode in row) == Counter(range(1, 33))
+
+
+def make_canvas(path, title_text):
+    c = canvas.Canvas(path, pagesize=A5, invariant=1, pageCompression=1)
+    c.setTitle(title_text)
+    c.setAuthor("2XD8 Entropy Booklet opposite-fold contributors")
+    c.setSubject("Offline physical BIP39 entropy with opposite-complement folding")
+    return c
+
+
+def generate_easy(path=EASY_OUT):
+    c = make_canvas(path, "2XD8 Entropy Booklet - Opposite Fold Easy")
+    draw_cover(c, "EASY / RECOMMENDED EDITION")
+    draw_guide_pages(c)
+    draw_selector(c)
+    draw_final3(c)
+    draw_final7(c)
+    # Ten content pages plus this deliberate spacer put each NORMAL page on
+    # an even/left page and its matching MIRROR page on the following right page.
+    draw_blank(c)
+    for card, mode, _ in build_easy_pages():
+        draw_easy_card(c, card, mode)
+    c.save()
+    return path
+
+
+def generate_compact(path=COMPACT_OUT):
+    c = make_canvas(path, "2XD8 Entropy Booklet - Opposite Fold Compact")
+    draw_cover(c, "COMPACT / ADVANCED EDITION")
+    draw_guide_pages(c)
+    draw_selector(c)
+    draw_final3(c)
+    draw_final7(c)
+    draw_blank(c)
+    for card, _ in build_compact_pages():
+        draw_compact_card(c, card)
+    c.save()
+    return path
+
+
+def main():
+    V.register_fonts()
+    self_check()
+    easy = generate_easy()
+    compact = generate_compact()
+    print("OK Easy booklet ->", os.path.relpath(easy, HERE))
+    print("OK Compact booklet ->", os.path.relpath(compact, HERE))
+
+
+if __name__ == "__main__":
+    main()
